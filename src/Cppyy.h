@@ -206,6 +206,8 @@ namespace Cppyy {
     CPPYY_IMPORT
     bool IsAggregate(TCppType_t type);
     CPPYY_IMPORT
+    bool IsIntegerType(TCppType_t type, bool* is_signed = nullptr);
+    CPPYY_IMPORT
     bool IsDefaultConstructable(TCppScope_t scope);
     CPPYY_IMPORT
     bool IsVariable(TCppScope_t scope);

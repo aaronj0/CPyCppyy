@@ -1656,28 +1656,20 @@ bool CPyCppyy::Pythonize(PyObject* pyclass, Cppyy::TCppScope_t scope)
 // std::optional<std::size_t>. Skip if size() has multiple overloads, as that
 // indicates it is not the simple container-style size() one would map to __len__.
     if (HasAttrDirect(pyclass, PyStrings::gSize, /*mustBeCPyCppyy=*/true) || HasAttrInMRO(pyclass, PyStrings::gSize)) {
-       bool sizeIsInteger = false;
-       PyObject *pySizeMethod = PyObject_GetAttr(pyclass, PyStrings::gSize);
-       if (pySizeMethod && CPPOverload_Check(pySizeMethod)) {
-          auto *ol = (CPPOverload *)pySizeMethod;
-          if (ol->HasMethods() && ol->fMethodInfo->fMethods.size() == 1) {
-             PyObject *pyrestype =
-                ol->fMethodInfo->fMethods[0]->Reflex(Cppyy::Reflex::RETURN_TYPE, Cppyy::Reflex::AS_STRING);
-             if (pyrestype) {
-                sizeIsInteger = Cppyy::IsIntegerType(CPyCppyy_PyText_AsString(pyrestype));
-                Py_DECREF(pyrestype);
+       bool hasIterators = (HasAttrDirect(pyclass, PyStrings::gBegin) || HasAttrInMRO(pyclass, PyStrings::gBegin)) &&
+                           (HasAttrDirect(pyclass, PyStrings::gEnd) || HasAttrInMRO(pyclass, PyStrings::gEnd));
+       bool hasSubscript = HasAttrDirect(pyclass, PyStrings::gGetItem) || HasAttrInMRO(pyclass, PyStrings::gGetItem);
+
+       if (hasIterators || hasSubscript) {
+          PyObject *pySizeMethod = PyObject_GetAttr(pyclass, PyStrings::gSize);
+          if (pySizeMethod && CPPOverload_Check(pySizeMethod)) {
+             auto *ol = (CPPOverload *)pySizeMethod;
+             if (ol->HasMethods() && ol->fMethodInfo->fMethods.size() == 1 &&
+                 Cppyy::IsIntegerType(Cppyy::GetMethodReturnType(ol->fMethodInfo->fMethods[0]))) {
+                Utility::AddToClass(pyclass, "__len__", "size");
              }
           }
-       }
-       Py_XDECREF(pySizeMethod);
-
-       if (sizeIsInteger) {
-          bool hasIterators = (HasAttrDirect(pyclass, PyStrings::gBegin) || HasAttrInMRO(pyclass, PyStrings::gBegin)) &&
-                              (HasAttrDirect(pyclass, PyStrings::gEnd) || HasAttrInMRO(pyclass, PyStrings::gEnd));
-          bool hasSubscript = HasAttrDirect(pyclass, PyStrings::gGetItem) || HasAttrInMRO(pyclass, PyStrings::gGetItem);
-          if (hasIterators || hasSubscript) {
-             Utility::AddToClass(pyclass, "__len__", "size");
-          }
+          Py_XDECREF(pySizeMethod);
        }
     }
 
