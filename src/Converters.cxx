@@ -2801,8 +2801,14 @@ static void* PyFunction_AsCPointer(PyObject* pyobject,
                 return nullptr;
 
         // TODO: is there no easier way?
-            static Cppyy::TCppScope_t scope = Cppyy::GetScope("__cppyy_internal");
+        // NB: fetch the namespace fresh each call. A cached (static) handle to
+        // __cppyy_internal goes stale across incremental PTUs in clang-repl; once
+        // stale, GetMethodsFromName returns empty and the methods[0] below reads an
+        // empty vector -> SIGSEGV. A fresh GetScope() always resolves the wrapper.
+            Cppyy::TCppScope_t scope = Cppyy::GetScope("__cppyy_internal");
             const auto& methods = Cppyy::GetMethodsFromName(scope, wname.str());
+            if (methods.empty())   // wrapper not found: fail cleanly, never dereference methods[0]
+                return nullptr;
             wpraddress = Cppyy::GetFunctionAddress(methods[0], false);
             sWrapperReference[wpraddress] = ref;
 
@@ -2881,17 +2887,22 @@ bool CPyCppyy::FunctionPointerConverter::ToMemory(
 bool CPyCppyy::StdFunctionConverter::SetArg(
     PyObject* pyobject, Parameter& para, CallContext* ctxt)
 {
-// prefer normal "object" conversion
-    CallContextRAII<CallContext::kNoImplicit> noimp(ctxt);
-    if (fConverter->SetArg(pyobject, para, ctxt))
-        return true;
+// prefer normal "object" conversion; keep kNoImplicit scoped to this attempt
+// only, so it does not suppress the implicit copy the wrapper-fallback relies on
+    {
+        CallContextRAII<CallContext::kNoImplicit> noimp(ctxt);
+        if (fConverter->SetArg(pyobject, para, ctxt))
+            return true;
+    }
 
     PyErr_Clear();
 
 // else create a wrapper function
     if (this->FunctionPointerConverter::SetArg(pyobject, para, ctxt)) {
     // retrieve the wrapper pointer and capture it in a temporary std::function,
-    // then try normal conversion a second time
+    // then convert again with implicit conversion allowed (kNoImplicit scoped out
+    // above): the wrapper is flagged kIsLValue for reuse, so binding it to a
+    // std::function&& parameter needs an implicit copy, not a move.
         PyObject* func = this->FunctionPointerConverter::FromMemory(&para.fValue.fVoidp);
         if (func) {
             SetLifeLine(ctxt->fPyContext, func, (intptr_t)this);

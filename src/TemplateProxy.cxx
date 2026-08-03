@@ -67,7 +67,14 @@ PyObject *TemplateProxy::Instantiate(const std::string &fname,
   bool skipSelf = fTI->fIsConstructor && (!fSelf || fSelf == Py_None);
   if (fSelf && (fSelf != Py_None) && (!fTI->fIsConstructor)) {
     PyObject *self = (PyObject *)fSelf;
-    assert(AddTypeName(proto, (PyObject *)Py_TYPE(self), self, Utility::kNone));
+    // AddTypeName prepends the implicit-object (self) type to `proto` as a side
+    // effect; the call must run under NDEBUG (Release) too, so it cannot live inside
+    // assert(). Otherwise proto stays empty for nullary templated method calls, so
+    // GetMethodTemplate passes arg_types={} and Cpp::BestOverloadFunctionMatch reads
+    // Args[0] (the implicit object) out of bounds -> SIGSEGV in clang::Expr::Classify.
+    bool addedSelf = AddTypeName(proto, (PyObject *)Py_TYPE(self), self, Utility::kNone);
+    assert(addedSelf);
+    (void)addedSelf;
   }
 
   // adjust arguments for self if this is a rebound global function
